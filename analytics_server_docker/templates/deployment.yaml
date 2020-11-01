@@ -1,0 +1,196 @@
+{{- range $service, $val := .Values.services }}
+{{- $serviceOverride :=  deepCopy ( index $.Values $val.container_name | default dict ) | mergeOverwrite ( deepCopy $.Values.default | mergeOverwrite ( dict ) )  }}
+{{- $serviceName := $serviceOverride.fullnameOverride | default $val.container_name }}
+{{- $multiFileConfig := printf "%s-cm-multi-file" $serviceName }}
+{{- $multiFileConfigVolume := printf "%s-volume" $multiFileConfig }}
+{{- $fileHandlerCount := int ( len ( $serviceOverride.fileHandler.files ) ) }}
+{{- $needsFileHandling := lt 0 $fileHandlerCount }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  namespace: {{ $.Release.Namespace }}
+  labels: {{ include "analytics-server.labels" $ | nindent 4 }}
+    app.kubernetes.io/service: {{ $serviceName }}    
+  name: {{ $serviceName }}
+spec:
+  replicas: {{ $serviceOverride.replicaCount }}
+  selector:
+    matchLabels: {{ include "analytics-server.labels" $ | nindent 6 }}
+      app.kubernetes.io/service: {{ $serviceName }}
+  strategy: {}
+  template:
+    metadata:
+      labels: {{ include "analytics-server.labels" $ | nindent 8 }}
+        app.kubernetes.io/service: {{ $serviceName }}
+      {{- range $network, $v := $val.networks }}
+        {{- printf "app.kubernetes.io/%s : true" $v | trim | nindent 8 }}
+      {{- end }}
+    spec:
+    {{- with $serviceOverride.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | trim | nindent 8 }}
+    {{- end }}
+      serviceAccountName: {{ template "analytics-server.serviceAccountName" $ }}
+      securityContext: {{- toYaml $serviceOverride.podSecurityContext | nindent 8 }}
+    {{- with $val.hostname }}
+      hostname: {{ tpl . $ }}
+    {{- end }}
+    {{- $hasExtraInitContainers := and $serviceOverride.extraInitContainers ( lt 0 ( int ( len ( $serviceOverride.extraInitContainers ) ) ) ) }}
+    {{- if $serviceOverride.fileHandler.debug }}
+    {{ printf "# debugFileHandlerCount: %s" ( $fileHandlerCount | toString ) }}
+    {{ printf "# debugNeedsFileHandling: %s" ( $needsFileHandling | toString ) }}
+    {{ printf "# debugHasExtraInitContainers: %s" ( $hasExtraInitContainers | toString ) }}
+    {{ printf "# debugValDepends_on: %s" ( $val.depends_on | toString) }}
+    {{- end }}
+    {{- if or $val.depends_on ( or $needsFileHandling $hasExtraInitContainers ) }}
+      initContainers:
+      {{- range $dependency, $v := $val.depends_on }}
+      - name: {{ printf "init-%s" $v }}
+        image: busybox
+        command: ['sh', '-c', {{ printf "'until nslookup %s; do echo waiting for %s; sleep 2; done;'" $v $v }} ]
+      {{- end }}
+      {{- range $volume := $val.volumes }}
+      {{- $mountParams := split ":" $volume }}
+      {{- $sourcePath := $mountParams._0 }}
+      {{- $targetPath := $mountParams._1 }}
+      {{- range $checkSum, $filePath := $serviceOverride.fileHandler.files }}
+        {{- if regexMatch ( printf "^%s" $sourcePath ) $filePath }}
+        {{- $relativePath := regexReplaceAll "^(\\./)?(.*)/?" $filePath "${2}" }}
+        {{- $fileName := base $filePath }}
+        {{- $fileExt:= regexReplaceAll "^.*\\.([A-Za-z0-9]{2,4})$" $fileName "${1}" }} 
+        {{- $sourceUri := printf "%s/%s" $serviceOverride.fileHandler.baseUri $relativePath }}
+        {{- $targetUri := ternary $targetPath ( printf "%s/%s" $targetPath $fileName ) ( regexMatch ( printf "\\.%s$" $fileExt ) $targetPath ) }}
+      - name: {{ printf "init-%s" $checkSum }}
+        image: busybox
+        command: ['sh', '-c', {{ printf "'t=\"%s\"; h=\"$t.sha256\"; echo \"%s\" > $h; if [ ! -f \"$t\" ]; then wget \"%s\" -qO \"$t\"; fi ;" $targetUri $checkSum $sourceUri }} {{ ternary ( printf " if sha256sum \"$t\" |grep -Eo \"^\\w+\" |cmp -s $h ; then exit 0 ; else echo ERROR: Invalid SHA256 hash ; exit 1; fi ;'" ) "'" $serviceOverride.fileHandler.validateCheckSum }} ]
+        {{- if $serviceOverride.fileHandler.debug }}
+        {{ printf "# debugFilePath: %s" $filePath }}
+        {{ printf "# debugRelativePath: %s" $relativePath }}
+        {{ printf "# debugFileName: %s" $fileName }}
+        {{ printf "# debugfileExt: %s" $fileExt }}
+        {{ printf "# debugSourcePath: %s" $sourcePath }}
+        {{ printf "# debugSourceUri: %s" $sourceUri }}
+        {{ printf "# debugTargetPath: %s" $targetPath }}
+        {{ printf "# debugTargetUri: %s" $targetUri }}
+        {{- end }}
+        {{- $targetDir := dir $targetUri }}
+        {{- $volumeName := default "root" ( base $targetDir ) }}
+        volumeMounts:
+        - name: {{ $volumeName }}
+          mountPath: {{ $targetDir }}
+        {{- end }}
+      {{- end }}
+      {{- end }}
+      {{- end }}
+    {{- with $serviceOverride.extraInitContainers }}
+      {{- tpl . $ | trim | nindent 6 }}
+    {{- end }}
+      containers:
+      {{- with $serviceOverride.extraContainers }}
+        {{- tpl . $ | trim | nindent 6 }}
+      {{- end }}
+      - image: {{ $serviceOverride.image | default $val.image | quote }}
+        imagePullPolicy: {{ $serviceOverride.imageConfig.pullPolicy }}
+        name: {{ $serviceOverride.fullnameOverride | default $val.container_name }}
+      {{- with $val.command }}
+        args:
+        {{- range $arg := splitList " " $val.command }}
+        - {{ $arg | quote }}
+        {{- end }}
+      {{- end }}
+      
+      {{- if or $serviceOverride.extraPorts ( or $val.Ports $val.expose ) }}
+        ports: 
+        {{- range $portpair := $val.ports }}
+          {{- printf "- containerPort: %s" ( split ":" $portpair )._0 | trim | nindent 8 }}
+        {{- end }} 
+        {{- range $port := $val.expose }}
+          {{- printf "- containerPort: %s" ( $port | toString ) | trim | nindent 8 }}
+        {{- end }}
+        {{- with $serviceOverride.extraPorts }}
+          {{- toYaml . | trim | nindent 8 }}
+        {{- end }}
+        {{- with $serviceOverride.resources }}
+        resources: {{ toYaml $serviceOverride.resources | nindent 10 }}
+        {{- end }}
+      {{- end }}
+      {{- if or $val.environment $serviceOverride.extraEnv }}
+        env:
+        {{- range $k, $v := $val.environment }}
+        - name: {{ $k }}
+          value: "{{ $v }}"
+        {{- end }}
+        {{- with $serviceOverride.extraEnv }}
+          {{- tpl . $ | trim | nindent 8 }}
+        {{- end }}
+      {{- end }}
+      {{- $hasExtraVolumeMounts := and $serviceOverride.extraVolumeMounts ( lt 0 ( int ( len ( $serviceOverride.extraVolumeMounts ) ) ) ) }}
+      {{- if or $val.volumes ( or $needsFileHandling $hasExtraVolumeMounts ) }}
+        volumeMounts:
+        {{- range $volume := $val.volumes }}
+        {{- $mountParams := split ":" $volume }}
+        {{- $sourcePath := $mountParams._0 }}
+        {{- $targetPath := $mountParams._1 }}
+        {{- $readOnly := default false ( eq "ro" $mountParams._2 ) }}
+        {{- $relativePath := regexReplaceAll "^(\\./)?(.*)$" $sourcePath "${2}" }}
+        {{- range $checkSum, $filePath := $serviceOverride.fileHandler.files }}
+        {{- if regexMatch ( printf "^%s" $sourcePath ) $filePath }}
+        {{- $fileName := base $filePath }}
+        {{- $fileExt:= regexReplaceAll "^.*\\.([A-Za-z0-9]{2,4})$" $fileName "${1}" }} 
+        {{- $targetDir := ternary ( dir $targetPath ) $targetPath ( regexMatch "^.*\\.([A-Za-z0-9]{2,4})$" $targetPath ) }}
+        {{- $volumeName := default "root" ( base $targetDir ) }}
+        - name: {{ $volumeName }}
+          mountPath: {{ $targetDir }}
+          readOnly: {{ $readOnly }}
+        {{- end }}
+        {{- end }}
+        {{- range $filePath, $bytes := $.Files.Glob ( printf "%s**" $relativePath ) }}
+        {{- $size := int ( len ( $bytes ) ) }}
+        {{- $maxSize := int ( $serviceOverride.fileHandler.maxSize ) }}
+        {{- $checkSum := sha256sum $filePath }}
+        {{- if gt $size $maxSize }}
+        {{- fail ( printf "Found file that is too large (%s > %s), please make the following modifications to this chart:\nhelmignore:\n  %s\n.Values.%s.fileHandler.files\n  %s: %s\nYou can also identify the oversized files by running the follow command:\nfind . -size +%dc -type f -exec sha256sum '{}' +" $size $maxSize $filePath $serviceName $checkSum $filePath $maxSize) }}
+        {{- else }}
+        {{- $fileName := base $filePath }}
+        {{- $fileExt:= regexReplaceAll "^.*\\.([A-Za-z0-9]{2,4})$" $fileName "${1}" }} 
+        {{- $targetUri := ternary $targetPath ( printf "%s/%s" $targetPath $fileName ) ( regexMatch ( printf "\\.%s$" $fileExt ) $targetPath ) }}
+        - name: {{ $multiFileConfigVolume }}
+          mountPath: {{- printf "%s" $targetUri | trim | indent 2 }}
+          subPath: {{- $checkSum | trim | indent 2 }}
+          readOnly: {{ $readOnly }}
+          {{- if $serviceOverride.fileHandler.debug }}
+          {{ printf "# debugFileSize: %d " $size }}
+          {{- end }}
+        {{- end }}
+        {{- end }}       
+        {{- end }}
+        {{- with $serviceOverride.extraVolumeMounts }}
+          {{- tpl . $ | trim | nindent 8 }}
+        {{- end }}
+      {{- end }}
+      restartPolicy: Always
+    {{- $hasExtraVolumes := and $serviceOverride.extraVolumes ( lt 0 ( int ( len ( $serviceOverride.extraVolumes ) ) ) ) }}
+    {{- if or $val.volumes $serviceOverride.extraVolumes }}
+      volumes:
+      - name: {{ $multiFileConfigVolume }}
+        configMap:
+          name: {{ $multiFileConfig }}
+      {{- range $volume := $val.volumes }}
+      {{- $mountParams := split ":" $volume }}
+      {{- $sourcePath := $mountParams._0 }}
+      {{- $targetPath := $mountParams._1 }}
+      {{- $relativePath := regexReplaceAll "^(\\./)?(.*)$" $sourcePath "${2}" }} 
+      {{- if not ( $.Files.Get $relativePath ) }}
+      {{- $targetDir := ternary ( dir $targetPath ) $targetPath ( regexMatch "^.*\\.([A-Za-z0-9]{2,4})$" $targetPath ) }}
+      {{- $volumeName := default "root" ( base $targetDir ) }}
+      - name: {{ $volumeName }}
+        {{ toYaml $serviceOverride.fileHandler.volumeType }}
+      {{- end }}
+      {{- end }}
+      {{- with $serviceOverride.extraVolumes }}
+        {{-  tpl . $ | trim | nindent 6 }}
+      {{- end }}
+    {{- end }}
+status: {}
+---
+{{- end }}
+

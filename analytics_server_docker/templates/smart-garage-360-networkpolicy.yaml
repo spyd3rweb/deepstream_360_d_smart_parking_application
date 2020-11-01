@@ -1,0 +1,15 @@
+apiVersion: extensions/v1beta1
+kind: NetworkPolicy
+metadata:
+  namespace: {{ .Release.Namespace }}
+  labels: {{ include "analytics-server.labels" . | nindent 4 }}
+  name: smart-garage-360
+spec:
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app.kubernetes.io/smart-garage-360: "true"
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/smart-garage-360: "true"

@@ -1,0 +1,8 @@
+apiVersion: v2
+name: analytics-server
+description: A Helm Chart adapted from a Kompose conversion of NVidia's deepstream_360_d_smart_parking_application
+type: application
+version: 0.1.0
+appVersion: 1.16.0
+keywords:
+  - analytics-server

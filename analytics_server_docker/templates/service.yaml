@@ -1,0 +1,22 @@
+{{ range $service, $val := .Values.services }}
+{{- $serviceOverride :=  deepCopy ( index $.Values $val.container_name | default dict ) | mergeOverwrite ( deepCopy $.Values.default | mergeOverwrite ( dict ) )  }}
+{{- $serviceName := $serviceOverride.fullnameOverride | default $val.container_name }}
+apiVersion: v1
+kind: Service
+metadata:
+  namespace: {{ $.Release.Namespace }}
+  labels: {{ include "analytics-server.labels" $ | nindent 4 }}
+    app.kubernetes.io/service: {{ $serviceName }}
+  name: {{ $serviceName }}
+spec:
+  type: {{ $serviceOverride.service.type }}
+  ports:
+  {{- range $k, $v := $val.ports }}
+  - name: "{{ splitList ":" $v | first }}"
+    port: {{ splitList ":" $v | first }}
+    targetPort: {{ splitList ":" $v | last }}
+  {{- end }}  
+  selector:
+    app.kubernetes.io/service: {{ $serviceName }}
+---
+{{ end }}

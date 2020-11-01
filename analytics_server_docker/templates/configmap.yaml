@@ -1,0 +1,43 @@
+{{ range $service, $val := .Values.services }}
+{{- $serviceOverride :=  deepCopy ( index $.Values $val.container_name | default dict ) | mergeOverwrite ( deepCopy $.Values.default | mergeOverwrite ( dict ) )  }}
+{{- $serviceName := $serviceOverride.fullnameOverride | default $val.container_name }}
+{{- $multiFileConfig := printf "%s-cm-multi-file" $serviceName }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  namespace: {{ $.Release.Namespace }}
+  labels: {{ include "analytics-server.labels" $ | nindent 4 }}
+    app.kubernetes.io/service: {{ $serviceName }}
+  name: {{ $multiFileConfig }}
+binaryData:
+  {{- range $volume := $val.volumes }}
+  {{- $mountParams := split ":" $volume }}
+  {{- $sourcePath := $mountParams._0 }}
+  {{- $targetPath := $mountParams._1 }}
+  {{- $readOnly := default false ( eq "ro" $mountParams._2 ) }}
+  {{- $relativePath := regexReplaceAll "^(\\./)?(.*)$" $sourcePath "${2}" }}
+  {{- if $.Files.Get $relativePath }}
+  {{- printf "%s: %s" ( sha256sum $sourcePath ) ( $.Files.Get $relativePath | b64enc ) | nindent 2 }}
+  {{- else }}
+  {{- $maxSize := int ( $serviceOverride.fileHandler.maxSize ) }}
+  {{- range $filePath, $bytes := $.Files.Glob ( printf "%s**" $relativePath ) }}
+    {{- $size := int ( len ( $bytes ) ) }}
+    {{- $maxSize := int ( $serviceOverride.fileHandler.maxSize ) }}
+    {{- $checkSum := sha256sum $filePath }}
+    {{- if gt $size $maxSize }}
+  {{- fail ( printf "Found file that is too large (%s > %s), please make the following modifications to this chart:\nhelmignore:\n  %s\n.Values.%s.fileHandler.files\n  %s: %s\nYou can also identify the oversized files by running the follow command:\nfind . -size +%dc -type f -exec sha256sum '{}' +" $size $maxSize $filePath $serviceName $checkSum $filePath $maxSize) }}
+    {{- else }}
+    {{- printf "%s: %s" $checkSum ( $.Files.Get $filePath | b64enc ) | nindent 2 }}
+    {{- end }}
+  {{- end }}
+  {{- end }}
+  {{- end }}
+---
+{{- range $serviceOverride.extraConfigMaps }}
+apiVersion: v1
+kind: ConfigMap
+metadata: {{- tpl .metadata $ | trim | nindent 2 }}
+data: {{- tpl .data $ | trim | nindent 2 }}
+---
+{{- end }}
+{{- end }}

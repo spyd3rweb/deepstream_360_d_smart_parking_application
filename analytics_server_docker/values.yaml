@@ -1,0 +1,264 @@
+# Default values for analytics-server.
+# This is a YAML-formatted file.
+#f .Values.default.enabled }} Declare variables to be passed into your templates.
+nameOverride: "analytics-server"
+fullnameOverride: "analytics-server"
+
+serviceAccount:
+  # Specifies whether a service account should be created
+  create: true
+  # The name of the service account to use.
+  # If not set and create is true, a name is generated using the fullname template
+  name: ""
+  
+# configmap.yaml
+extraConfigMaps: []
+
+# serviceaccount.yaml
+extraServiceAccounts: []
+
+# serviceaccount.yaml
+extraRoles: []
+
+# serviceaccount.yaml
+extraClusterRoles: []
+
+# serviceaccount.yaml
+extraRoleBindings: []
+
+# serviceaccount.yaml
+extraClusterRoleBindings: []
+
+# secrets.yaml
+extraSecrets: []
+
+default:
+
+  fileHandler:
+    debug: false 
+    maxSize: 500000
+    baseUri: "https://raw.githubusercontent.com/NVIDIA-AI-IOT/deepstream_360_d_smart_parking_application/b9b1f9e9aa84e379c573063fc5622ef50d38898d/analytics_server_docker/" 
+    validateCheckSum: true 
+    # find . -size +500000c -type f -exec sha256sum '{}' +
+    files: {}
+    volumeType:
+      emptyDir: {}
+
+  replicaCount: 1
+  
+  image:
+    repository: analytics-server
+    tag: latest
+    pullPolicy: IfNotPresent
+    
+  imageConfig:
+    pullPolicy: IfNotPresent
+  
+  extraImages: {}
+  #  appExample: "app-example"
+  
+  extraVolumes: []
+
+  extraVolumeMounts: []
+
+  extraEnv: []
+
+  extraPorts: []
+
+  extraInitContainers: []
+
+  extraContainers: []
+  
+  imagePullSecrets: []
+  fullnameOverride: "analytics-server"
+  
+  podSecurityContext: {}
+    # fsGroup: 2000
+  
+  securityContext: {}
+    # capabilities:
+    #   drop:
+    #   - ALL
+    # readOnlyRootFilesystem: true
+    # runAsNonRoot: true
+    # runAsUser: 1000
+  
+  service:
+    type: ClusterIP
+    #port: 80
+  
+  ingress:
+    enabled: false
+    annotations: {}
+      # kubernetes.io/ingress.class: nginx
+      # kubernetes.io/tls-acme: "true"
+    hosts:
+      - host: analytics-server.deepstream.svc.cluster.local
+        paths: []
+  
+    tls: []
+    #  - secretName: analytics-server-tls
+    #    hosts:
+    #      - analytics-server.deepstream.svc.cluster.local
+  
+  resources: {}
+    # We usually recommend not to specify default resources and to leave this as a conscious
+    # choice for the user. This also increases chances charts run on environments with little
+    # resources, such as Minikube. If you do want to specify resources, uncomment the following
+    # lines, adjust them as necessary, and remove the curly braces after 'resources:'.
+    # limits:
+    #   cpu: 100m
+    #   memory: 128Mi
+    # requests:
+    #   cpu: 100m
+    #   memory: 128Mi
+  
+  nodeSelector: {}
+  
+  tolerations: []
+  
+  affinity: {}
+
+
+cassandra:
+  enabled: true
+
+  # deployment.yaml
+  replicaCount: 1
+  
+  # deployment.yaml
+  image: registry.airship.cloud/cassandra
+    
+  fullnameOverride: "cassandra"
+  
+elasticsearch:
+  enabled: true
+
+  # deployment.yaml
+  replicaCount: 1
+  
+  # deployment.yaml
+  image: registry.airship.cloud/elasticsearch
+    
+  fullnameOverride: "elasticsearch"
+  
+logstash:
+  enabled: true
+
+  # deployment.yaml
+  replicaCount: 1
+  
+  # deployment.yaml
+  image: registry.airship.cloud/logstash
+    
+  fullnameOverride: "logstash"
+  
+kibana:
+  enabled: true
+
+  # deployment.yaml
+  replicaCount: 1
+  
+  # deployment.yaml
+  image: registry.airship.cloud/kibana
+    
+  fullnameOverride: "kibana"
+  
+zookeeper:
+  enabled: true
+
+  # deployment.yaml
+  replicaCount: 1
+  
+  # deployment.yaml
+  image: wurstmeister/zookeeper
+    
+  fullnameOverride: "zookeeper"
+  
+kafka:
+  enabled: true
+
+  # deployment.yaml
+  replicaCount: 1
+  
+  # deployment.yaml
+  image: registry.airship.cloud/kafka
+    
+  fullnameOverride: "kafka"
+  
+  # deployment.yaml
+  extraVolumes: |
+
+    - name: socket
+      hostPath:
+        path: /var/run/docker.sock
+  
+  # deployment.yaml
+  extraVolumeMounts: |
+
+    - name: socket
+      mountPath: /var/run/docker.sock
+
+spark-master:
+  enabled: true
+
+  # deployment.yaml
+  replicaCount: 1
+  
+  # deployment.yaml
+  image: gettyimages/spark:2.2.0-hadoop-2.7
+    
+  fullnameOverride: "spark-master"
+
+  fileHandler:
+    files:
+      2fc2e29759b13ae644d5c805a878abd36c585e19d0d578226ecdac4a0ab5b071: './spark/data/stream-360-1.0-jar-with-dependencies.jar'
+
+spark-worker:
+  enabled: true
+
+  # deployment.yaml
+  replicaCount: 1
+  
+  # deployment.yaml
+  image: gettyimages/spark:2.2.0-hadoop-2.7
+    
+  fullnameOverride: "spark-worker"
+
+  fileHandler:
+    files:
+      2fc2e29759b13ae644d5c805a878abd36c585e19d0d578226ecdac4a0ab5b071: './spark/data/stream-360-1.0-jar-with-dependencies.jar'
+
+apis:
+  enabled: true
+
+  # deployment.yaml
+  replicaCount: 1
+  
+  # deployment.yaml
+  image: registry.airship.cloud/apis
+    
+  fullnameOverride: "apis"
+
+ui:
+  enabled: true
+
+  # deployment.yaml
+  replicaCount: 1
+  
+  # deployment.yaml
+  image: registry.airship.cloud/ui
+    
+  fullnameOverride: "ui"
+
+python-tracker-module:
+  enabled: true
+
+  # deployment.yaml
+  replicaCount: 1
+  
+  # deployment.yaml
+  image: registry.airship.cloud/python-tracker-module
+    
+  fullnameOverride: "python-tracker-module"
+
